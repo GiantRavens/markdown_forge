@@ -1,0 +1,16 @@
+# Virtual environments
+.venv*/
+
+# Obsidian workspace data
+.obsidian*/
+
+# Conversion staging areas
+archive/
+IN/
+OUT/
+
+# Python artifacts
+__pycache__/
+
+# macOS metadata
+*.DS_Store
