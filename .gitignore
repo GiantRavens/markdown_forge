@@ -8,8 +8,10 @@
 
 # Conversion staging areas
 archive/
-IN/
-OUT/
+IN/*
+!IN/.gitkeep
+OUT/*
+!OUT/.gitkeep
 
 # Python artifacts
 __pycache__/
