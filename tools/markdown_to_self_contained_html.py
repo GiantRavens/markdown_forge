@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Render Markdown into a single-page self-contained HTML document via Pandoc.
 
+Part of the `markdown_forge` framework.
+
 This utility wraps `pandoc` to emit an HTML file with embedded assets and
 inline CSS. The generated page prefers Georgia for body copy and Menlo for
 monospaced code blocks.
@@ -69,13 +71,17 @@ blockquote {
 }
 
 img {
+    display:block;
     max-width: 100%;
+    margin-left:auto;
+    margin-right:auto;
     height: auto;
 }
 """.strip()
 
 
 def strip_front_matter(text: str) -> tuple[str, dict[str, str], bool]:
+    """Remove leading YAML front matter, returning body text, metadata, and flag."""
     metadata: dict[str, str] = {}
     if not text.startswith("---"):
         return text, metadata, False
@@ -118,6 +124,7 @@ def render_markdown_to_html(
     pandoc: str = "pandoc",
     title: str | None = None,
 ) -> None:
+    """Convert Markdown to standalone HTML using Pandoc with embedded CSS/assets."""
     if not source.exists():
         raise FileNotFoundError(f"Markdown source '{source}' does not exist")
 
@@ -199,6 +206,7 @@ def render_markdown_to_html(
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Configure CLI arguments for Markdown-to-HTML conversion."""
     parser = argparse.ArgumentParser(
         description="Convert Markdown to a self-contained single-page HTML document via Pandoc."
     )
@@ -224,6 +232,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI entry point that renders Markdown into a single HTML file."""
     args = parse_args(argv)
 
     source: Path = args.source

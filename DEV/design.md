@@ -1,34 +1,26 @@
 # design
 
-The 'convert' folder will contain media that will be converted to various formats to make it easier for them to be searched, organized, and discovered for AI and OS level file search.
+## Overall goal
 
-A general 'convert' script can be called that will in turn invoke smaller, more modular tools to perform more atomic functions such as:
+The `markdown_forge/` workspace standardizes EPUB and PDF publications so they can be parsed, enriched, and redistributed. Clean Markdown becomes the canonical source for:
 
-- file type verification and extension correction
-- publication publisher house extraction
-- publication publication year extraction
-- publication author or editor extraction
-- publication ISBN, or LOC, or other identifier extraction
-- publication title renaming in this order if present:
-  - series name and number in numerals in proper titlecase
-  - title and edition (without any subtitlespunctuation such as apostrophes, colons, parentheses, etc.) in proper titlecase
-  - a conjunction marker of ' - '
-  - the publisher name in proper titlecase without company names like 'Inc.', 'LLC', etc.
-  - a conjunction of ' '
-  - the publication year in numerals
-  - a conjunction of ' '
-  - the publication identifier type and value in numerals
+- **AI/ML discovery and vectorization** (LLM embeddings, semantic retrieval, fine-tuning datasets).
+- **Human browsing and OS-level search** (descriptive filenames, metadata, accessible HTML/EPUB exports).
+- **Repeatable publishing workflows** that regenerate derivative assets without manual rework.
 
-A proper title might look like this:
+## Core workflow
 
-  `Alternative Scriptwriting 4th edition by Ken Dancyger and Jeff Rush - Focal Press 2022 ISBN13 9780240808499.pdf`
+- **Intake**: Drop raw EPUB/PDF files into the `IN/` directory.
+- **Preprocess**: Run `python tools/convert_IN_preprocess.py` to orchestrate detection, conversion, and cleanup. Individual tools can be run ad hoc when deeper control is required.
+- **Canonicalize**: Treat the generated Markdown (and its front matter) as the single source of truth for edits, metadata, and downstream automation.
+- **Enrich & iterate**: Apply cleanup utilities, augment metadata, and feed Markdown to AI/ML pipelines or vector stores for discovery tasks.
+- **Publish**: Regenerate distributable assets on demand via `tools/markdown_to_self_contained_html.py` and `tools/markdown_to_epub.py`. Use `tools/publication_cleanup.py` to stage finished publications in `OUT/`.
 
-- a description shall be determined for the documents content
-- In the case of PDF's, the PDF document properties shall be reset for the title, author, subject, and keywords - if possible h1 (title), h2 (chapter titles), h3 (chapter section headers) with strict html semantic hierarchy.
+## Tooling overview
 
-A single 'media_convert' command shall be analyze the contents of the IN folder and take the appropriate actions, calling modular tools from the 'tools' folder as needed to perform its actions as needed.
+Each script in `tools/` tackles a focused part of the pipeline. Use them individually or via the `convert_IN_preprocess.py` orchestrator inside the `markdown_forge` framework.
 
-## Tooling Overview
+### Individual tools
 
 - **`tools/filetype_inspect.py`**
   - **Usage**: `python tools/filetype_inspect.py PATH [PATH ...]`
@@ -73,6 +65,28 @@ A single 'media_convert' command shall be analyze the contents of the IN folder 
     - `--chapter-level` control heading level splits.
     - `--pandoc` select pandoc binary.
   - **Primary Output**: Builds a styled EPUB honoring front matter metadata and prints processing errors or exits with success.
+
+- **`tools/pdf_to_markdown.py`**
+  - **Usage**: `python tools/pdf_to_markdown.py path/to/file.pdf [--dest DIR] [--force] [--dpi N] [--margin-top PTS] [--margin-bottom PTS] [--min-repeat N] [--skip-pattern REGEX]`
+  - **Flags**:
+    - `--dest` override the workspace root (default: PDF parent directory).
+    - `--force` replace an existing workspace.
+    - `--margin-top` / `--margin-bottom` define header/footer detection bands (points).
+    - `--min-repeat` controls how often a header/footer must repeat before removal.
+    - `--skip-pattern` append additional regex filters for footer/header cleanup.
+  - **Primary Output**: Moves the PDF into `source_pdf/`, writes `<slug>.md` with filtered text content, and stores page images as `source_pdf/extracted/page-####.png`.
+
+- **`tools/epub_markdown_cleanup.py`**
+  - **Usage**: `python tools/epub_markdown_cleanup.py path/to/file.md [--dry-run]`
+  - **Flags**:
+    - `--dry-run` preview output without writing.
+  - **Primary Output**: Removes Calibre attribute blocks, normalizes headings/TOC, drops front-matter `contributor`/`description` entries, trims `title_short` after colons/dashes, deletes colon-prefixed block directives, converts long dash rules to `<hr>`, strips early SVG cover fragments, flattens `images/OEBPS/` assets into `images/`, rewrites image references, fixes malformed nested links, and cleans redundant anchors/classes from Pandoc EPUB conversions.
+
+- **`tools/convert_IN_preprocess.py`**
+  - **Usage**: `python tools/convert_IN_preprocess.py [--in-dir DIR] [--dry-run]`
+  - **Flags**:
+    - `--in-dir` override the default `IN/` directory root.
+  - **Primary Output**: Iterates top-level EPUB/PDF files in `IN/`, runs `filetype_inspect.py`, converts via `epub_to_markdown.py` or `pdf_to_markdown.py`, and applies the matching cleanup tool. Logs progress and surfaces any command failures.
 
 - **`tools/publication_cleanup.py`**
   - **Usage**: `python tools/publication_cleanup.py path/to/publication_dir [--dry-run]`

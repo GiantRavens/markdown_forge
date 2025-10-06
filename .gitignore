@@ -1,5 +1,7 @@
 # Virtual environments
 .venv*/
+.docling*/
+.docling-venv/
 
 # Obsidian workspace data
 .obsidian*/
@@ -11,6 +13,8 @@ OUT/
 
 # Python artifacts
 __pycache__/
+*.py[cod]
+*$py.class
 
 # macOS metadata
 *.DS_Store

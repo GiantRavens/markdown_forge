@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Post-processing utility for publication folders.
 
+Part of the `markdown_forge` framework.
+
 This script inspects the primary Markdown file within a publication directory,
 extracts normalized metadata (title, title_short, author, publisher, year,
 ISBN), and renames the directory itself along with key publication exports

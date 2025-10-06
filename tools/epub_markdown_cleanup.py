@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Incremental Markdown cleanup utilities.
 
+Part of the `markdown_forge` framework.
+
 Currently supports removing inlined Pandoc/Calibre anchor spans such as
 `{#part0005.html_id_Toc123 .block_17}`.
 
@@ -15,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import shutil
 import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
@@ -32,14 +35,13 @@ SPAN_CLASS_PATTERN = re.compile(r"<span class=\"([^\"]+)\">(.*?)</span>", re.DOT
 CLASS_ONLY_BRACES_PATTERN = re.compile(r"\{\s*(?:\.[A-Za-z0-9_-]+\s*)+\}")
 MULTI_BLANK_PATTERN = re.compile(r"(?:[ \t]*\n){3,}")
 HEADING_PATTERN = re.compile(r"^(#{1,6})\s+(.*)$")
-HTML_COMMENT_PATTERN = re.compile(r"<!--.*?-->", re.DOTALL)
 CALIBRE_CONTAINER_PATTERN = re.compile(
     r"(?sm)^(?P<indent>[ \t]*):::{4,}\s+calibre\w*\s*\n(?P<body>.*?)(?:\n(?P=indent):::{4,}\s*(?:\n|$))"
 )
 CALIBRE_ITEM_PATTERN = re.compile(r":::\s+block_[^\s]+\s*\n(.*?)(?:\n:::\s*(?:\n|$))", re.DOTALL)
 CALIBRE_BULLET_PATTERN = re.compile(r"^\s*\[[^\]]*\]\[(?P<text>.*?)\]\s*$", re.DOTALL)
-CALIBRE_ONLY_PATTERN = re.compile(r"^\s*:::+\s+calibre[^\s]*\s*$", re.IGNORECASE)
-BLOCK_ONLY_PATTERN = re.compile(r"^\s*:::+\s+block_[^\s]*\s*$", re.IGNORECASE)
+CALIBRE_ONLY_PATTERN = re.compile(r"^:::+\s+calibre[^\s]*\s*$", re.IGNORECASE)
+BLOCK_ONLY_PATTERN = re.compile(r"^:::+\s+block_[^\s]*\s*$", re.IGNORECASE)
 BULLETED_SQUARE_PATTERN = re.compile(r"^(?P<prefix>\s*)\[•\s*\]\s*(?P<text>.+)$")
 BULLET_ONLY_PATTERN = re.compile(r"^(?P<prefix>\s*)•\s+(?P<text>.+)$")
 SQUARE_BULLET_MARKER_PATTERN = re.compile(r"\[•\s*\]")
@@ -49,14 +51,27 @@ REDUNDANT_ESCAPE_PATTERN = re.compile(r"\\([.!?,:;'])")
 TILDE_LINE_PATTERN = re.compile(r"^\s*~+\s*$")
 EMPTY_BRACKETS_PATTERN = re.compile(r"\[\s+\]")
 HYPHEN_BULLET_PATTERN = re.compile(r"^\s*-\s+\S")
-REDUNDANT_IMAGE_SEGMENT_PATTERN = re.compile(r"images/(?:images/)+")
+REDUNDANT_IMAGE_SEGMENT_PATTERN = re.compile(r"images/(?:(?:images|OEBPS)/)+", re.IGNORECASE)
 ISBN_PATTERN = re.compile(r"\bISBN(?:-1[03])?:?\s*([0-9][0-9Xx\s-]{8,}[0-9Xx])", re.IGNORECASE)
 NON_LINK_BRACKET_PATTERN = re.compile(r"\[(?P<text>[^\]]+)\](?!\s*(\(|:))")
 PART_LINK_PATTERN = re.compile(r"\[(?P<label>[^\]]+)\]\(#part[^\)]+\)", re.IGNORECASE)
 INLINE_EM_DASH_PATTERN = re.compile(r"(?<!-)(---)(?!-)")
+HTML_COMMENT_PATTERN = re.compile(r"<!--.*?-->", re.DOTALL)
+CBJ_BLOCK_PATTERN = re.compile(r"^\s*:::\s+cbj_[^\s]+$", re.IGNORECASE)
+BACKSLASH_ONLY_PATTERN = re.compile(r"^\s*\\\s*$")
+STYLE_LINE_PATTERN = re.compile(r"^\s*\{\s*style\s*=\s*\"[^\"]*\"\s*\}\s*$", re.IGNORECASE)
+COLON_BLOCK_PATTERN = re.compile(r"^:::+\s*.*$")
+DASH_RULE_PATTERN = re.compile(r"^-{5,}$")
+MALFORMED_LINK_PATTERN = re.compile(r"\[\[\]\[(?P<text>[^\]]+)\]\((?P<primary>#[^\)]+)\)\]\((?P<secondary>#[^\)]+)\)")
+EMPTY_LABEL_LINK_PATTERN = re.compile(r'\[\]\s*([^\]]+?)(?=\]\()')
+SVG_OPEN_PATTERN = re.compile(r"<svg\b", re.IGNORECASE)
+SVG_CLOSE_PATTERN = re.compile(r"</svg>", re.IGNORECASE)
+OEBPS_IMAGE_PATTERN = re.compile(r"^images/(?:OEBPS/)+(.+)$")
+MARKDOWN_IMAGE_PATTERN = re.compile(r"(!\[[^\]]*\]\()([^\)]+)(\))")
 
 
 def normalize_isbn(raw: str | None) -> Optional[str]:
+    """Normalize raw ISBN strings into 10/13 digit uppercase variants."""
     if not raw:
         return None
     cleaned = re.sub(r"[^0-9Xx]", "", raw)
@@ -68,6 +83,7 @@ def normalize_isbn(raw: str | None) -> Optional[str]:
 
 
 def extract_isbn(text: str, fallback_identifiers: Iterable[str] | None = None) -> Optional[str]:
+    """Search Markdown text and fallback identifiers for a usable ISBN."""
     for match in ISBN_PATTERN.finditer(text):
         normalized = normalize_isbn(match.group(1))
         if normalized:
@@ -81,13 +97,27 @@ def extract_isbn(text: str, fallback_identifiers: Iterable[str] | None = None) -
 
 
 def compute_title_short(title: str) -> str:
-    for separator in ("—", "–", ":"):
-        if separator in title:
-            return title.split(separator, 1)[0].strip()
-    return title.strip()
+    """Derive a succinct title by trimming subtitles and dash suffixes."""
+    if not title:
+        return ""
+    result = title.strip()
+    if ":" in result:
+        result = result.split(":", 1)[0].strip()
+    dash_split = re.split(r"\s*[–—-]\s+", result, 1)
+    if len(dash_split) > 1:
+        result = dash_split[0].strip()
+    return result
+
+
+def trim_title_short(value: str) -> str:
+    """Convenience wrapper that routes to `compute_title_short` when populated."""
+    if not value:
+        return ""
+    return compute_title_short(value)
 
 
 def parse_front_matter_block(lines: List[str]) -> Optional[Tuple[Dict[str, Any], List[str], Set[str]]]:
+    """Parse a YAML front matter block into metadata, preserving key order."""
     if not lines or lines[0].strip() != "---" or lines[-1].strip() != "---":
         return None
 
@@ -129,6 +159,7 @@ def parse_front_matter_block(lines: List[str]) -> Optional[Tuple[Dict[str, Any],
 
 
 def needs_quotes(value: str) -> bool:
+    """Return True when a YAML scalar should be quoted for safety."""
     if value == "" or value != value.strip():
         return True
     if any(ch in value for ch in (":", "#", "\"", "'")):
@@ -141,6 +172,7 @@ def needs_quotes(value: str) -> bool:
 
 
 def format_scalar_value(value: Any, force_quotes: bool) -> str:
+    """Render a YAML scalar string, quoting when requested or necessary."""
     text = "" if value is None else str(value)
     if force_quotes or needs_quotes(text):
         escaped = text.replace("\"", "\\\"")
@@ -149,6 +181,7 @@ def format_scalar_value(value: Any, force_quotes: bool) -> str:
 
 
 def serialize_front_matter(metadata: Dict[str, Any], order: List[str], quoted: Set[str]) -> List[str]:
+    """Serialize metadata dict back into a YAML front matter sequence."""
     lines = ["---"]
     seen: Set[str] = set()
     for key in order + [k for k in metadata.keys() if k not in order]:
@@ -167,6 +200,7 @@ def serialize_front_matter(metadata: Dict[str, Any], order: List[str], quoted: S
 
 
 def parse_css_styles(css_text: str) -> Dict[str, Set[str]]:
+    """Extract class-to-style flags (bold/italic/sup/sub) from CSS text."""
     mapping: Dict[str, Set[str]] = {}
     for match in CSS_CLASS_PATTERN.finditer(css_text):
         class_name = match.group(1)
@@ -192,7 +226,10 @@ def parse_css_styles(css_text: str) -> Dict[str, Set[str]]:
 
 
 def load_style_map(markdown_file: Path) -> Dict[str, Set[str]]:
+    """Locate adjacent CSS files and build a class->style lookup map."""
     candidates = [
+        markdown_file.parent / "source_epub" / "extracted" / "stylesheet.css",
+        markdown_file.parent / "source_epub" / "stylesheet.css",
         markdown_file.parent / "source" / "extracted" / "stylesheet.css",
         markdown_file.parent / "source" / "stylesheet.css",
     ]
@@ -207,6 +244,7 @@ def load_style_map(markdown_file: Path) -> Dict[str, Set[str]]:
 
 
 def parse_class_list(spec: str) -> List[str]:
+    """Tokenize a Pandoc/Markdown class specification into individual names."""
     spec = spec.strip()
     if not spec:
         return []
@@ -216,6 +254,7 @@ def parse_class_list(spec: str) -> List[str]:
 
 
 def aggregate_styles(class_names: Iterable[str], style_map: Dict[str, Set[str]]) -> Set[str]:
+    """Combine style attributes for all class names with known mappings."""
     styles: Set[str] = set()
     for class_name in class_names:
         styles.update(style_map.get(class_name, set()))
@@ -318,8 +357,21 @@ def normalize_square_bullets(lines: List[str]) -> List[str]:
 
 def remove_vestigial_blocks(lines: List[str]) -> List[str]:
     cleaned: List[str] = []
+    in_code_block = False
     for line in lines:
+        stripped_leading = line.lstrip()
+        if stripped_leading.startswith("```") or stripped_leading.startswith("~~~"):
+            in_code_block = not in_code_block
+            cleaned.append(line)
+            continue
+        if in_code_block:
+            cleaned.append(line)
+            continue
+
         stripped = line.strip()
+        if not stripped:
+            cleaned.append(line)
+            continue
         if EMPTY_STYLE_BLOCK_PATTERN.match(stripped):
             continue
         if BARE_CALIBRE_PATTERN.match(stripped):
@@ -330,8 +382,117 @@ def remove_vestigial_blocks(lines: List[str]) -> List[str]:
             continue
         if TILDE_LINE_PATTERN.match(stripped):
             continue
+        if CBJ_BLOCK_PATTERN.match(stripped):
+            continue
+        if BACKSLASH_ONLY_PATTERN.match(stripped):
+            continue
+        if STYLE_LINE_PATTERN.match(stripped):
+            continue
+        if COLON_BLOCK_PATTERN.match(stripped):
+            continue
         cleaned.append(line)
     return cleaned
+
+
+def convert_dash_rules(lines: List[str]) -> List[str]:
+    result: List[str] = []
+    in_code_block = False
+    for line in lines:
+        stripped_leading = line.lstrip()
+        if stripped_leading.startswith("```") or stripped_leading.startswith("~~~"):
+            in_code_block = not in_code_block
+            result.append(line)
+            continue
+        if in_code_block:
+            result.append(line)
+            continue
+        if DASH_RULE_PATTERN.match(line.strip()):
+            result.append("<hr>")
+            continue
+        result.append(line)
+    return result
+
+
+def remove_svg_blocks(lines: List[str]) -> List[str]:
+    result: List[str] = []
+    in_svg = False
+    for line in lines:
+        if not in_svg and SVG_OPEN_PATTERN.search(line):
+            in_svg = True
+            continue
+        if in_svg:
+            if SVG_CLOSE_PATTERN.search(line):
+                in_svg = False
+            continue
+        result.append(line)
+    return result
+
+
+def fix_malformed_links(lines: List[str]) -> List[str]:
+    fixed: List[str] = []
+    for line in lines:
+        def repl(match: re.Match[str]) -> str:
+            text = match.group("text").strip()
+            target = match.group("primary")
+            return f"[{text}]({target})"
+
+        fixed.append(MALFORMED_LINK_PATTERN.sub(repl, line))
+    return fixed
+
+
+def remove_empty_label_links(lines: List[str]) -> List[str]:
+    cleaned: List[str] = []
+    for line in lines:
+        cleaned.append(EMPTY_LABEL_LINK_PATTERN.sub(lambda m: f"[{m.group(1).strip()}]", line))
+    return cleaned
+
+
+def flatten_image_paths(markdown_file: Path) -> None:
+    images_root = markdown_file.parent / "images"
+    if not images_root.exists():
+        return
+
+    for image_path in list(images_root.rglob("*")):
+        if not image_path.is_file():
+            continue
+        relative_parts = image_path.relative_to(images_root).parts
+        if "OEBPS" not in relative_parts:
+            continue
+        target = images_root / image_path.name
+        if target == image_path:
+            continue
+        if target.exists():
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(image_path), target)
+
+    # Remove now-empty directories inside images/, including OEBPS
+    empty_dirs = sorted((p for p in images_root.rglob("*") if p.is_dir()), reverse=True)
+    for directory in empty_dirs:
+        try:
+            directory.rmdir()
+        except OSError:
+            continue
+
+    oebps_dir = images_root / "OEBPS"
+    if oebps_dir.exists():
+        try:
+            oebps_dir.rmdir()
+        except OSError:
+            pass
+
+
+def rewrite_markdown_image_paths(lines: List[str]) -> List[str]:
+    rewritten: List[str] = []
+    for line in lines:
+        def replacer(match: re.Match[str]) -> str:
+            prefix, path, suffix = match.groups()
+            normalized = REDUNDANT_IMAGE_SEGMENT_PATTERN.sub("images/", path)
+            normalized = OEBPS_IMAGE_PATTERN.sub(r"images/\1", normalized)
+            return f"{prefix}{normalized}{suffix}"
+
+        rewritten.append(MARKDOWN_IMAGE_PATTERN.sub(replacer, line))
+    return rewritten
 
 
 def remove_empty_brackets(lines: List[str]) -> List[str]:
@@ -499,11 +660,12 @@ def slugify_heading(text: str) -> str:
     return slug.strip("-")
 
 
-def demote_headings(lines: List[str]) -> tuple[List[str], List[str], str | None]:
+def demote_headings(lines: List[str]) -> tuple[List[str], List[Tuple[str, str]], str | None]:
     in_code_block = False
     new_lines: List[str] = []
-    toc_entries: List[str] = []
+    toc_entries: List[Tuple[str, str]] = []
     first_heading_text: str | None = None
+    slug_counts: Dict[str, int] = {}
 
     for line in lines:
         stripped = line.strip()
@@ -523,28 +685,29 @@ def demote_headings(lines: List[str]) -> tuple[List[str], List[str], str | None]
                     new_level = 2
                 else:
                     new_level = level
-                new_line = f"{'#' * new_level} {text}".rstrip()
-                new_lines.append(new_line)
+                slug_id: Optional[str] = None
                 if new_level == 2 and normalized not in {"table of contents", "table of content"}:
-                    toc_entries.append(text)
+                    base_slug = slugify_heading(text) or "section"
+                    count = slug_counts.get(base_slug, 0)
+                    slug_id = base_slug if count == 0 else f"{base_slug}-{count}"
+                    slug_counts[base_slug] = count + 1
+                    toc_entries.append((text, slug_id))
+
+                new_line = f"{'#' * new_level} {text}".rstrip()
+                if slug_id:
+                    new_line = f"{new_line} {{#{slug_id}}}"
+                new_lines.append(new_line)
                 continue
         new_lines.append(line)
 
     return new_lines, toc_entries, first_heading_text
 
 
-def build_toc_lines(entries: List[str]) -> List[str]:
+def build_toc_lines(entries: List[Tuple[str, str]]) -> List[str]:
     if not entries:
         return []
     lines = ["## Table of Contents", ""]
-    counts: Dict[str, int] = {}
-    for text in entries:
-        base = slugify_heading(text)
-        if not base:
-            base = "section"
-        count = counts.get(base, 0)
-        slug = base if count == 0 else f"{base}-{count}"
-        counts[base] = count + 1
+    for text, slug in entries:
         lines.append(f"- [{text}](#{slug})")
     lines.append("")
     return lines
@@ -570,7 +733,7 @@ def replace_existing_toc(lines: List[str], toc_lines: List[str]) -> tuple[List[s
     return lines, False
 
 
-def adjust_headings_and_build_toc(text: str) -> str:
+def adjust_headings_and_build_toc(text: str, markdown_file: Path) -> str:
     text = text.replace("\u00a0", " ")
     lines = text.splitlines()
     if not lines:
@@ -605,12 +768,18 @@ def adjust_headings_and_build_toc(text: str) -> str:
         front_matter_lines = []
 
     body_lines = lines[body_start:]
+    flatten_image_paths(markdown_file)
     body_lines = normalize_square_bullets(body_lines)
     body_lines = strip_part_links(body_lines)
     body_lines = convert_inline_em_dashes(body_lines)
     body_lines = strip_non_link_brackets(body_lines)
     body_lines = remove_empty_brackets(body_lines)
     body_lines = remove_vestigial_blocks(body_lines)
+    body_lines = convert_dash_rules(body_lines)
+    body_lines = remove_svg_blocks(body_lines)
+    body_lines = fix_malformed_links(body_lines)
+    body_lines = remove_empty_label_links(body_lines)
+    body_lines = rewrite_markdown_image_paths(body_lines)
     body_lines = bold_uppercase_lines(body_lines)
     body_lines = ensure_blank_line_after_hyphen_lists(body_lines)
     body_lines = strip_redundant_escapes(body_lines)
@@ -621,6 +790,13 @@ def adjust_headings_and_build_toc(text: str) -> str:
     body_text_for_isbn = "\n".join(body_lines)
 
     if metadata is not None:
+        for drop_key in ("contributor", "description"):
+            if drop_key in metadata:
+                metadata.pop(drop_key, None)
+                if drop_key in metadata_order:
+                    metadata_order.remove(drop_key)
+                quoted_keys.discard(drop_key)
+
         identifiers_raw = metadata.get("identifier")
         identifier_candidates: List[str] = []
         if isinstance(identifiers_raw, list):
@@ -655,7 +831,8 @@ def adjust_headings_and_build_toc(text: str) -> str:
             title_source = first_heading_text
         if title_source and not metadata.get("title_short"):
             metadata["title_short"] = compute_title_short(title_source)
-        if "title_short" in metadata:
+        if "title_short" in metadata and isinstance(metadata.get("title_short"), str):
+            metadata["title_short"] = trim_title_short(metadata["title_short"])
             quoted_keys.add("title_short")
 
         front_matter_lines = serialize_front_matter(metadata, metadata_order, quoted_keys)
@@ -691,7 +868,7 @@ def collapse_blank_lines(text: str) -> str:
     return MULTI_BLANK_PATTERN.sub("\n\n", text)
 
 
-def clean_markdown_text(text: str, style_map: Dict[str, Set[str]]) -> str:
+def clean_markdown_text(text: str, markdown_file: Path, style_map: Dict[str, Set[str]]) -> str:
     # Remove inline anchors
     text = ANCHOR_PATTERN.sub("", text)
     # Drop empty link lines
@@ -712,7 +889,7 @@ def clean_markdown_text(text: str, style_map: Dict[str, Set[str]]) -> str:
     text = apply_pandoc_class_notation(text, style_map)
     text = apply_span_classes(text, style_map)
     text = convert_calibre_blocks(text)
-    text = adjust_headings_and_build_toc(text)
+    text = adjust_headings_and_build_toc(text, markdown_file)
     # Remove residual class braces and attributes
     text = CLASS_ONLY_BRACES_PATTERN.sub("", text)
     text = re.sub(r"\sclass=\"[^\"]+\"", "", text)
@@ -728,7 +905,7 @@ def clean_markdown_text(text: str, style_map: Dict[str, Set[str]]) -> str:
 def process_file(path: Path, dry_run: bool) -> bool:
     original = path.read_text(encoding="utf-8")
     style_map = load_style_map(path)
-    cleaned_text = clean_markdown_text(original, style_map)
+    cleaned_text = clean_markdown_text(original, path, style_map)
     if cleaned_text == original:
         return False
     if dry_run:

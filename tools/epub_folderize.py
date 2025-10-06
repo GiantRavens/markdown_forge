@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Organize an EPUB into a titled workspace and unpack its contents.
 
+Part of the `markdown_forge` framework.
+
 For a given EPUB this tool:
 - Determines a folder name based on the EPUB title metadata (fallback to filename)
-- Creates `<dest>/<title>/source/`
-- Moves the EPUB file into the `source/` directory
-- Extracts the EPUB archive into `<dest>/<title>/source/extracted/`
+- Creates `<dest>/<title>/source_epub/`
+- Moves the EPUB file into the `source_epub/` directory
+- Extracts the EPUB archive into `<dest>/<title>/source_epub/extracted/`
 
 Usage:
     python tools/epub_folderize.py path/to/book.epub [--dest DIR] [--force]
@@ -25,6 +27,7 @@ DC_NS = "http://purl.org/dc/elements/1.1/"
 CONTAINER_NS = "urn:oasis:names:tc:opendocument:xmlns:container"
 
 def read_epub_title(epub_path: Path) -> Optional[str]:
+    """Extract the Dublin Core title from the EPUB package metadata."""
     try:
         with zipfile.ZipFile(epub_path) as zf:
             container_xml = zf.read("META-INF/container.xml")
@@ -47,12 +50,14 @@ def read_epub_title(epub_path: Path) -> Optional[str]:
     return None
 
 def slugify(text: str, fallback: str) -> str:
+    """Normalize a string into a filesystem-safe slug, using `fallback` if empty."""
     normalized = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
     cleaned = "".join(ch if ch.isalnum() or ch in (" ", "-", "_") else " " for ch in normalized)
     slug = "-".join(part for part in cleaned.strip().split() if part)
     return slug or fallback
 
 def prepare_destination(epub_path: Path, dest_root: Path, title: Optional[str], force: bool) -> Path:
+    """Create the target workspace directory, clearing it when `--force` is set."""
     fallback_name = epub_path.stem
     folder_name = slugify(title or fallback_name, fallback=fallback_name)
     target_dir = dest_root / folder_name
@@ -61,24 +66,27 @@ def prepare_destination(epub_path: Path, dest_root: Path, title: Optional[str], 
             raise FileExistsError(f"Destination '{target_dir}' already exists. Use --force to replace it.")
         shutil.rmtree(target_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
-    (target_dir / "source").mkdir(exist_ok=True)
+    (target_dir / "source_epub").mkdir(exist_ok=True)
     return target_dir
 
 def move_original(epub_path: Path, dest_dir: Path) -> Path:
-    source_dir = dest_dir / "source"
+    """Move the original EPUB into `source_epub/` inside the destination."""
+    source_dir = dest_dir / "source_epub"
     source_dir.mkdir(exist_ok=True)
     target_path = source_dir / epub_path.name
     shutil.move(str(epub_path), target_path)
     return target_path
 
 def extract_epub(epub_path: Path, dest_dir: Path) -> Path:
-    extract_dir = dest_dir / "source" / "extracted"
+    """Unpack the EPUB archive contents into `source_epub/extracted/`."""
+    extract_dir = dest_dir / "source_epub" / "extracted"
     extract_dir.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(epub_path) as zf:
         zf.extractall(extract_dir)
     return extract_dir
 
 def folderize_epub(epub_path: Path, dest_root: Path, force: bool) -> Path:
+    """Build a folderized workspace around `epub_path`, returning the new root."""
     if not epub_path.exists():
         raise FileNotFoundError(epub_path)
     if not epub_path.is_file():
@@ -90,6 +98,7 @@ def folderize_epub(epub_path: Path, dest_root: Path, force: bool) -> Path:
     return dest_dir
 
 def main() -> int:
+    """CLI entry point for converting a single EPUB into a managed workspace."""
     parser = argparse.ArgumentParser(description="Organize an EPUB and unpack its contents")
     parser.add_argument("epub", type=Path, help="Path to the EPUB file")
     parser.add_argument("--dest", type=Path, default=None, help="Destination directory (default: EPUB parent)")

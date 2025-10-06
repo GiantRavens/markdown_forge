@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Convert an EPUB workspace into cleaned Markdown with extracted images.
 
+Part of the `markdown_forge` framework.
+
 Steps performed:
 - Ensure a book root folder exists (create via `epub_folderize` if starting from an EPUB file).
 - Run pandoc to create `<Title>.md` in the book root and extract referenced images to `images/`.
@@ -10,7 +12,6 @@ Steps performed:
 Usage:
     python tools/epub_to_markdown.py <book_root_or_epub_path> [--force]
 """
-
 from __future__ import annotations
 
 import argparse
@@ -30,11 +31,13 @@ except ImportError:  # pragma: no cover - fallback if module path changes
 
 
 def ensure_pandoc_available() -> None:
+    """Raise an error if `pandoc` cannot be located on PATH."""
     if shutil.which("pandoc") is None:
         raise RuntimeError("pandoc is required but not found on PATH")
 
 
 def sanitize_filename(name: str) -> str:
+    """Coerce `name` into a safe filesystem filename, falling back to `untitled`."""
     # Remove characters not allowed in file names on common filesystems
     forbidden = '<>:"/\\|?*'
     translated = ''.join('_' if ch in forbidden else ch for ch in name)
@@ -42,7 +45,7 @@ def sanitize_filename(name: str) -> str:
 
 
 def resolve_book_root(input_path: Path, force: bool) -> tuple[Path, Path]:
-    """Return (book_root, epub_path) ensuring the source workspace exists."""
+    """Determine the working book root and associated EPUB archive for conversion."""
     if input_path.is_file():
         if input_path.suffix.lower() != ".epub":
             raise ValueError("Input file must be an .epub")
@@ -50,23 +53,23 @@ def resolve_book_root(input_path: Path, force: bool) -> tuple[Path, Path]:
         folder_name = slugify(title, fallback=input_path.stem)
         parent = input_path.parent
         candidate_root = parent / folder_name
-        if candidate_root.exists() and (candidate_root / "source" / "extracted").exists():
+        if candidate_root.exists() and (candidate_root / "source_epub" / "extracted").exists():
             book_root = candidate_root
         else:
             book_root = folderize_epub(input_path, parent, force)
-        epub_in_source = next((candidate_root / "source").glob("*.epub"), None)
+        epub_in_source = next((candidate_root / "source_epub").glob("*.epub"), None)
         if epub_in_source:
             epub_path = epub_in_source
         else:
             # After folderize the file has been moved; search again inside book_root
-            epub_path = next((book_root / "source").glob("*.epub"), None)
+            epub_path = next((book_root / "source_epub").glob("*.epub"), None)
             if epub_path is None:
                 raise FileNotFoundError("Could not locate EPUB inside book root")
         return book_root, epub_path
 
     if input_path.is_dir():
         book_root = input_path
-        source_dir = book_root / "source"
+        source_dir = book_root / "source_epub"
         extracted_dir = source_dir / "extracted"
         if not extracted_dir.exists():
             epub_candidates = list(source_dir.glob("*.epub"))
@@ -86,6 +89,7 @@ def resolve_book_root(input_path: Path, force: bool) -> tuple[Path, Path]:
 
 
 def clean_existing_targets(images_dir: Path, markdown_path: Path, force: bool) -> None:
+    """Remove pre-existing Markdown/images outputs when `--force` is specified."""
     if images_dir.exists():
         if force:
             shutil.rmtree(images_dir)
@@ -101,6 +105,7 @@ def clean_existing_targets(images_dir: Path, markdown_path: Path, force: bool) -
 
 
 def flatten_extracted_media(images_dir: Path) -> None:
+    """Collapse nested image directories that Pandoc may create during extraction."""
     if not images_dir.exists():
         return
     while True:
@@ -121,6 +126,7 @@ def flatten_extracted_media(images_dir: Path) -> None:
 
 
 def run_pandoc(epub_path: Path, book_root: Path, markdown_filename: str) -> None:
+    """Execute pandoc to produce Markdown and extract media for the EPUB."""
     cmd = [
         "pandoc",
         str(epub_path),
@@ -139,6 +145,7 @@ def run_pandoc(epub_path: Path, book_root: Path, markdown_filename: str) -> None
 
 
 def strip_calibre_artifacts(markdown_text: str) -> str:
+    """Normalize Pandoc/Calibre residues (attribute lists, wrappers, extra blanks)."""
     # Remove attribute lists like {: .calibre1 }
     cleaned_lines = []
     attr_re = re.compile(r"\s*\{[^}]*\}")
@@ -156,12 +163,14 @@ def strip_calibre_artifacts(markdown_text: str) -> str:
 
 
 def normalize_image_links(text: str) -> str:
+    """Rewrite repeated `images/images/...` prefixes into a single segment."""
     text = re.sub(r"(?<=\()images/(?:images/)+", "images/", text)
     text = re.sub(r"(?<=[\"'])images/(?:images/)+", "images/", text)
     return text
 
 
 def parse_opf_path(extracted_dir: Path) -> Optional[Path]:
+    """Locate the primary OPF manifest within the extracted EPUB tree."""
     container = extracted_dir / "META-INF" / "container.xml"
     if not container.exists():
         return None
@@ -181,6 +190,7 @@ def parse_opf_path(extracted_dir: Path) -> Optional[Path]:
 
 
 def find_cover_candidates(opf_path: Path) -> list[Path]:
+    """Return candidate cover image files from the EPUB manifest."""
     candidates: list[Path] = []
     try:
         tree = ET.parse(opf_path)
@@ -207,6 +217,7 @@ def find_cover_candidates(opf_path: Path) -> list[Path]:
 
 
 def ensure_cover_in_images(extracted_dir: Path, images_dir: Path) -> None:
+    """Copy the largest declared cover image into the publication `images/` directory."""
     opf_path = parse_opf_path(extracted_dir)
     if not opf_path:
         return
@@ -223,6 +234,7 @@ def ensure_cover_in_images(extracted_dir: Path, images_dir: Path) -> None:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """CLI entry point that converts an EPUB workspace (or file) into Markdown."""
     parser = argparse.ArgumentParser(description="Generate Markdown and images from an EPUB workspace")
     parser.add_argument("input_path", type=Path, help="Book root directory or EPUB file path")
     parser.add_argument("--force", action="store_true", help="Overwrite existing markdown/images outputs")
@@ -242,7 +254,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         markdown_text = markdown_path.read_text(encoding="utf-8")
         cleaned = strip_calibre_artifacts(markdown_text)
         markdown_path.write_text(cleaned, encoding="utf-8")
-        extracted_dir = book_root / "source" / "extracted"
+        extracted_dir = book_root / "source_epub" / "extracted"
         ensure_cover_in_images(extracted_dir, images_dir)
         print(f"Markdown written to {markdown_path}")
         print(f"Images available in {images_dir}")

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Convert Markdown into a clean EPUB file via Pandoc.
 
+Part of the `markdown_forge` framework.
+
 This utility mirrors the behaviour of `markdown_to_self_contained_html.py`,
 but the output is an EPUB container. Front matter metadata (title, author)
 is respected, a simple Georgia/Menlo stylesheet is embedded, and external
@@ -88,6 +90,7 @@ blockquote {
 
 
 def strip_front_matter(text: str) -> tuple[str, dict[str, str], bool]:
+    """Remove YAML front matter block, returning remaining text, metadata, and flag."""
     metadata: dict[str, str] = {}
     if not text.startswith("---"):
         return text, metadata, False
@@ -125,6 +128,7 @@ def strip_front_matter(text: str) -> tuple[str, dict[str, str], bool]:
 
 
 def infer_epub_chapter_level(markdown_text: str) -> int:
+    """Guess which heading level should split chapters based on heading frequency."""
     heading_counts: dict[int, int] = {}
     for line in markdown_text.splitlines():
         match = re.match(r"^(#{1,6})\s+", line)
@@ -149,6 +153,7 @@ def resolve_cover_image(
     markdown_text: str,
     source: Path,
 ) -> Path | None:
+    """Find a cover image from CLI flag, metadata, or first Markdown image."""
     if explicit_cover is not None:
         return explicit_cover
 
@@ -177,6 +182,7 @@ def render_markdown_to_epub(
     cover_image: Path | None = None,
     chapter_level: int | None = None,
 ) -> None:
+    """Invoke Pandoc to package Markdown into an EPUB with styling and metadata."""
     if not source.exists():
         raise FileNotFoundError(f"Markdown source '{source}' does not exist")
 
@@ -269,6 +275,7 @@ def render_markdown_to_epub(
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Configure CLI options for Markdown-to-EPUB conversion."""
     parser = argparse.ArgumentParser(description="Convert Markdown to a clean EPUB with Pandoc.")
     parser.add_argument("source", type=Path, help="Input Markdown file")
     parser.add_argument("--output", "-o", type=Path, help="Destination EPUB file (default: replace .md with .epub)")
@@ -286,6 +293,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI entry point that converts Markdown content into an EPUB."""
     args = parse_args(argv)
 
     source: Path = args.source

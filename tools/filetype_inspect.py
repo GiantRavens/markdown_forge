@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """CLI tool to inspect and normalize file types.
 
+Part of the `markdown_forge` framework.
+
 For each input path this tool:
 - gathers type hints from external utilities (`file`, `exiftool`, `ffprobe`)
 - infers a canonical type/mime/extension
@@ -82,6 +84,7 @@ class InspectionReport:
 
 
 def run_command(args: List[str]) -> CommandResult:
+    """Execute the given command and capture stdout/stderr for reporting."""
     executable = args[0]
     if shutil.which(executable) is None:
         return CommandResult(available=False, returncode=None, stdout="", stderr=f"{executable} not found")
@@ -98,6 +101,7 @@ def run_command(args: List[str]) -> CommandResult:
 
 
 def parse_exiftool(stdout: str) -> Dict[str, str]:
+    """Parse `exiftool` key/value output into a dictionary."""
     info: Dict[str, str] = {}
     for line in stdout.splitlines():
         if ":" not in line:
@@ -108,6 +112,7 @@ def parse_exiftool(stdout: str) -> Dict[str, str]:
 
 
 def zip_epub_hint(path: Path) -> Optional[str]:
+    """Inspect a ZIP container for the EPUB mimetype declaration."""
     if not path.is_file():
         return None
     try:
@@ -125,6 +130,7 @@ def zip_epub_hint(path: Path) -> Optional[str]:
 
 
 def infer_type(path: Path, file_mime: Optional[str], exif_info: Dict[str, str], zip_hint: Optional[str]) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """Determine file type, MIME, and canonical extension using multiple hints."""
     # Priority order: ZIP hint -> file command -> exif info -> mimetypes guess
     mime = None
     file_type = None
@@ -167,6 +173,7 @@ def infer_type(path: Path, file_mime: Optional[str], exif_info: Dict[str, str], 
 
 
 def canonical_type_from_mime(mime: str) -> Optional[str]:
+    """Translate a MIME string into a canonical type identifier when known."""
     mime = mime.lower()
     for key, meta in TYPE_REGISTRY.items():
         if meta["mime"].lower() == mime:
@@ -181,6 +188,7 @@ def canonical_type_from_mime(mime: str) -> Optional[str]:
 
 
 def extension_from_mime(mime: str) -> Optional[str]:
+    """Return the preferred extension for the provided MIME type."""
     mime = mime.lower()
     for data in TYPE_REGISTRY.values():
         if data["mime"].lower() == mime:
@@ -192,6 +200,7 @@ def extension_from_mime(mime: str) -> Optional[str]:
 
 
 def maybe_rename(path: Path, wanted_extension: Optional[str], info_only: bool, report: InspectionReport) -> Path:
+    """Rename the file to the canonical extension when appropriate."""
     if not wanted_extension:
         return path
     current_ext = path.suffix.lower().lstrip('.')
@@ -214,6 +223,7 @@ def maybe_rename(path: Path, wanted_extension: Optional[str], info_only: bool, r
 
 
 def update_metadata(path: Path, file_type: Optional[str], mime: Optional[str], info_only: bool, report: InspectionReport) -> None:
+    """Refresh XMP metadata via `exiftool` when available."""
     if info_only or not mime:
         return
     if shutil.which("exiftool") is None:
@@ -239,6 +249,7 @@ def update_metadata(path: Path, file_type: Optional[str], mime: Optional[str], i
 
 
 def inspect_path(path: Path, info_only: bool) -> InspectionReport:
+    """Run external probes against `path` and aggregate the results."""
     report = InspectionReport(path=path)
 
     file_cmd = run_command(["file", "-b", "--mime-type", str(path)])
@@ -271,18 +282,19 @@ def inspect_path(path: Path, info_only: bool) -> InspectionReport:
 
 
 def iter_target_files(paths: List[Path], recursive: bool) -> List[Path]:
+    """Expand provided paths into a flat file list, respecting recursion flag."""
     targets: List[Path] = []
     for item in paths:
         if item.is_dir():
             if recursive:
                 for sub in item.rglob('*'):
-                    if sub.is_file():
+                    if sub.is_file() and sub.name != ".DS_Store":
                         targets.append(sub)
             else:
                 for sub in item.iterdir():
-                    if sub.is_file():
+                    if sub.is_file() and sub.name != ".DS_Store":
                         targets.append(sub)
-        elif item.is_file():
+        elif item.is_file() and item.name != ".DS_Store":
             targets.append(item)
         else:
             continue
@@ -290,6 +302,7 @@ def iter_target_files(paths: List[Path], recursive: bool) -> List[Path]:
 
 
 def format_report(report: InspectionReport) -> str:
+    """Render a human-readable summary for an `InspectionReport`."""
     lines = [f"Path: {report.path}"]
     lines.append(f"  Inferred type : {report.file_type or 'unknown'}")
     lines.append(f"  MIME type     : {report.mime_type or 'unknown'}")
@@ -312,6 +325,7 @@ def format_report(report: InspectionReport) -> str:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    """CLI entry point to inspect paths and optionally normalize file metadata."""
     parser = argparse.ArgumentParser(description="Inspect and normalize file types")
     parser.add_argument("paths", nargs="+", type=Path, help="Files or directories to inspect")
     parser.add_argument("--info-only", action="store_true", help="Do not rename or update metadata")
