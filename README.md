@@ -1,6 +1,6 @@
 # markdown_forge
 
-markdown_forge is a publication "forge" that reshapes opaque EPUB and PDF sources into AI/ML/search and discover toolready Markdown and clean publication exports of same.
+markdown_forge is a publication "forge" that reshapes opaque EPUB and PDF sources into AI/ML/search and discover tool-ready Markdown and clean publication exports of same.
 
 ## Purpose
 
@@ -14,8 +14,8 @@ markdown_forge is a publication "forge" that reshapes opaque EPUB and PDF source
 2. Run `python tools/convert_IN_preprocess.py` to inspect file types, route EPUBs and PDFs through the matching conversion/cleanup flow, and populate publication workspaces.
 Generally, run either epub_to_markdown <target> or pdf_to_markdown <target>. Then run epub_markdown_cleanup <target md file> or pdf_markdown_cleanup <target md file> to clean up the generated Markdown as needed. You will very likely need to confirm the frontmatter manually, and do regex cleanup.  
 3. Iterate on the generated Markdown within each publication directory until the content and metadata look correct.
-4. The intent is that the core .md files always stay and can be continually improved - and use the publishing tools  to generate EPUB/HTML versions - 
-5. When happy with the results, typically the core .md file with all images in a peer images directory, a self-contained .html file, and a clean .epub version, you can run publication_cleanup to move the .md and exponents into the OUT folder for further archiving. 
+4. The intent is that the core .md files always stay and can be continually improved - and use the publishing tools to generate EPUB/HTML versions as needed.
+5. When happy with the results each publication will have its own folder, within which are the core .md file, images in a  images directory, a self-contained .html file with embedded images (for single file viewing and discovery), and a clean .epub version. You can then run publication_cleanup to move the .md and exponents into the OUT folder for further archiving, data set collection, or reading. 
 
 ## Tool highlights
 
@@ -24,6 +24,7 @@ Generally, run either epub_to_markdown <target> or pdf_to_markdown <target>. The
 - **`tools/markdown_to_self_contained_html.py`**: Produces single-file HTML (embedded assets, inline CSS) from the canonical Markdown for maximum portability.
 - **`tools/markdown_to_epub.py`**: Rebuilds EPUB containers from the same Markdown touchstone once cleanup is complete.
 - **`tools/publication_cleanup.py`**: Renames publications and derivative assets based on front matter so `OUT/` stays organized.
+- **`tools/toc_rebuilder.py`**: Reconstructs the `## TABLE OF CONTENTS` section by linking every H2 heading in a Markdown file.
 - **PDF track**: `tools/pdf_to_markdown.py`, `tools/pdf_markdown_cleanup.py`, and `tools/acrobat-html_to_markdown.py` offer multiple paths—from direct PDF extraction to Acrobat HTML exports—for turning printed layouts into workable Markdown.
 
 ## Working with PDFs
@@ -36,7 +37,7 @@ Generally, run either epub_to_markdown <target> or pdf_to_markdown <target>. The
 
 - **`tools/`**: Command-line utilities that implement the ingestion, cleanup, and publishing pipeline.
 - **`IN/`** / **`OUT/`**: Working directories kept in version control via `.gitkeep` but emptied by default. Contents are ignored so personal source material never leaks into public history.
-- **`DEV/`**: Design notes and process documentation (see `DEV/design.md`).
+- **`design.md`**: Design notes and process documentation.
 - **`requirements.txt`**: Minimum Python package requirements for the toolchain.
 
 ## Getting started
@@ -44,3 +45,44 @@ Generally, run either epub_to_markdown <target> or pdf_to_markdown <target>. The
 - **Install dependencies**: `python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`
 - **Process inputs**: Place EPUB/PDF files inside `IN/` and run the orchestrator or individual tools as needed.
 - **Publish outputs**: Use the Markdown touchstone plus `tools/markdown_to_self_contained_html.py` and `tools/markdown_to_epub.py` to forge portable deliverables ready for AI/ML ingestion or general distribution.
+
+## TUI launcher
+
+If you don't want to manually invoke tools, use a lightweight TUI two-panel interface to work with your files.
+
+- **Launch**: From repo root, run:
+
+```bash
+python tools/tui_launcher.py
+```
+
+- **Panels**:
+  - Left: file browser rooted at the current directory
+  - Right: tool list and a live log area
+
+- **File browser conventions**:
+  - Files are prefixed with tags for quick recognition: `[PDF]`, `[EPUB]`, `[MD]`
+  - Directories show a trailing slash, e.g., `MyFolder/`
+  - The currently selected item is bolded
+
+- **Keybindings**:
+  - `enter`: select the highlighted file and focus the tool list
+  - `tab`: switch focus between file browser and tool list
+  - `r`: refresh the file browser (preserves panel order)
+  - `o`: open selected file (PDF/EPUB via system viewer; MD tries `nvim` in a new terminal window, else system opener)
+  - `e`: execute the selected tool on the selected file
+  - `q`: quit
+
+- **Tool execution UX**:
+  - The right log shows the exact command invoked, streams the tool output live, and reports completion status with elapsed time
+  - On successful completion, the file tree auto-refreshes
+
+## Pandoc requirement
+
+Several tools call the external Pandoc executable. Ensure the Pandoc CLI is installed and visible on your PATH; the Python package named `pandoc` installed via pip is not sufficient.
+
+- Debian/Ubuntu: `sudo apt-get install pandoc`
+- Fedora: `sudo dnf install pandoc`
+- Arch: `sudo pacman -S pandoc`
+- Conda: `conda install -c conda-forge pandoc`
+- Binaries: https://github.com/jgm/pandoc/releases

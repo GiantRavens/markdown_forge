@@ -20,6 +20,31 @@ The `markdown_forge/` workspace standardizes EPUB and PDF publications so they c
 
 Each script in `tools/` tackles a focused part of the pipeline. Use them individually or via the `convert_IN_preprocess.py` orchestrator inside the `markdown_forge` framework.
 
+### TUI launcher
+
+The textual TUI (`tools/tui_launcher.py`) provides an integrated experience to browse files, pick a tool, and see live output.
+
+- **Panels**
+  - Left: file browser rooted at the working directory
+  - Right: tool list and a live log view
+
+- **File browser conventions**
+  - Files are prefixed with tags for quick recognition: `[PDF]`, `[EPUB]`, `[MD]`
+  - Directories show a trailing slash, e.g., `MyFolder/`
+  - The selected item is shown in bold
+
+- **Keybindings**
+  - `enter`: select highlighted file and focus the tool list
+  - `tab`: switch focus between the file browser and tool list
+  - `r`: refresh the file browser (panel order preserved)
+  - `o`: open selected file (PDF/EPUB via system viewer; MD tries `nvim` in a new terminal window, else system opener)
+  - `e`: execute the selected tool on the selected file
+  - `q`: quit
+
+- **Execution UX**
+  - The log shows the exact command invoked, streams tool output live, and reports completion with elapsed time
+  - On success, the file tree auto-refreshes to reveal any new or changed outputs
+
 ### Individual tools
 
 - **`tools/filetype_inspect.py`**
